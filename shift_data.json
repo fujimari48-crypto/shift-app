@@ -1,0 +1,149 @@
+{
+    "staffs_db": {
+        "翔太": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "K (キッチン)"
+        },
+        "健太": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "K (キッチン)"
+        },
+        "大地": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "K (キッチン)"
+        },
+        "悠人": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "K (キッチン)"
+        },
+        "美咲": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "F (フロント)"
+        },
+        "葵": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "F (フロント)"
+        },
+        "凛": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "F (フロント)"
+        },
+        "結衣": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "F (フロント)"
+        },
+        "蓮": {
+            "password": "0000",
+            "hourly_wage": 1200,
+            "default_position": "Y (やきば)"
+        },
+        "樹": {
+            "password": "0000",
+            "hourly_wage": 1200,
+            "default_position": "Y (やきば)"
+        },
+        "湊": {
+            "password": "0000",
+            "hourly_wage": 1200,
+            "default_position": "Y (やきば)"
+        },
+        "陽翔": {
+            "password": "0000",
+            "hourly_wage": 1200,
+            "default_position": "Y (やきば)"
+        },
+        "テスト": {
+            "password": "0000",
+            "hourly_wage": 1100,
+            "default_position": "K (キッチン)"
+        }
+    },
+    "required_settings": {
+        "月": {
+            "K (キッチン)": 2,
+            "F (フロント)": 2,
+            "Y (やきば)": 1
+        },
+        "火": {
+            "K (キッチン)": 2,
+            "F (フロント)": 2,
+            "Y (やきば)": 1
+        },
+        "水": {
+            "K (キッチン)": 2,
+            "F (フロント)": 2,
+            "Y (やきば)": 1
+        },
+        "木": {
+            "K (キッチン)": 2,
+            "F (フロント)": 2,
+            "Y (やきば)": 1
+        },
+        "金": {
+            "K (キッチン)": 3,
+            "F (フロント)": 3,
+            "Y (やきば)": 2
+        },
+        "土": {
+            "K (キッチン)": 3,
+            "F (フロント)": 3,
+            "Y (やきば)": 2
+        },
+        "日": {
+            "K (キッチン)": 3,
+            "F (フロント)": 3,
+            "Y (やきば)": 2
+        }
+    },
+    "deadline_settings": {
+        "deadline": "2026-10-31 23:59"
+    },
+    "wishes_data": [],
+    "shifts_data": [
+        {
+            "staff_name": "翔太",
+            "date": "2026-10-01",
+            "shift": "K (キッチン)",
+            "time": ""
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-10-02",
+            "shift": "K (キッチン)",
+            "time": "17:00-"
+        }
+    ],
+    "published_shifts_data": [
+        {
+            "staff_name": "翔太",
+            "date": "2026-10-01",
+            "shift": "K (キッチン)",
+            "time": ""
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-10-02",
+            "shift": "K (キッチン)",
+            "time": "17:00-"
+        }
+    ],
+    "actual_shifts_data": [
+        {
+            "staff_name": "翔太",
+            "date": "2026-10-01",
+            "status": "遅刻",
+            "time": "18:00-22:00"
+        }
+    ],
+    "admin_credentials": {
+        "password": "1234"
+    }
+}
