@@ -1,76 +1,71 @@
 {
     "staffs_db": {
         "翔太": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "K (キッチン)"
         },
         "健太": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "K (キッチン)"
         },
         "大地": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "K (キッチン)"
         },
         "悠人": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "K (キッチン)"
         },
         "美咲": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "F (フロント)"
         },
         "葵": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "F (フロント)"
         },
         "凛": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "F (フロント)"
         },
         "結衣": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1100,
             "default_position": "F (フロント)"
         },
         "蓮": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1200,
             "default_position": "Y (やきば)"
         },
         "樹": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1200,
             "default_position": "Y (やきば)"
         },
         "湊": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1200,
             "default_position": "Y (やきば)"
         },
         "陽翔": {
-            "password": "0000",
+            "password": "0",
             "hourly_wage": 1200,
             "default_position": "Y (やきば)"
-        },
-        "テスト": {
-            "password": "0000",
-            "hourly_wage": 1100,
-            "default_position": "K (キッチン)"
         }
     },
     "required_settings": {
         "月": {
-            "K (キッチン)": 2,
-            "F (フロント)": 2,
-            "Y (やきば)": 1
+            "K (キッチン)": 3,
+            "F (フロント)": 3,
+            "Y (やきば)": 3
         },
         "火": {
             "K (キッチン)": 2,
@@ -106,41 +101,72 @@
     "deadline_settings": {
         "deadline": "2026-10-31 23:59"
     },
-    "wishes_data": [],
-    "shifts_data": [
+    "wishes_data": [
         {
             "staff_name": "翔太",
-            "date": "2026-10-01",
-            "shift": "K (キッチン)",
-            "time": ""
+            "date": "2026-11-01",
+            "shift": "出勤希望",
+            "time": "14:00-"
         },
         {
             "staff_name": "翔太",
-            "date": "2026-10-02",
+            "date": "2026-11-02",
+            "shift": "出勤希望",
+            "time": "-23:15"
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-11-03",
+            "shift": "希望休",
+            "time": ""
+        }
+    ],
+    "shifts_data": [
+        {
+            "staff_name": "翔太",
+            "date": "2026-11-01",
             "shift": "K (キッチン)",
-            "time": "17:00-"
+            "time": "14:00-"
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-11-02",
+            "shift": "K (キッチン)",
+            "time": "-23:15"
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-11-03",
+            "shift": "希望休",
+            "time": ""
         }
     ],
     "published_shifts_data": [
         {
             "staff_name": "翔太",
-            "date": "2026-10-01",
+            "date": "2026-11-01",
             "shift": "K (キッチン)",
-            "time": ""
+            "time": "14:00-"
         },
         {
             "staff_name": "翔太",
-            "date": "2026-10-02",
+            "date": "2026-11-02",
             "shift": "K (キッチン)",
-            "time": "17:00-"
+            "time": "-23:15"
+        },
+        {
+            "staff_name": "翔太",
+            "date": "2026-11-03",
+            "shift": "希望休",
+            "time": ""
         }
     ],
     "actual_shifts_data": [
         {
             "staff_name": "翔太",
-            "date": "2026-10-01",
-            "status": "遅刻",
-            "time": "18:00-22:00"
+            "date": "2026-11-01",
+            "status": "残業",
+            "time": "14:00-23:30"
         }
     ],
     "admin_credentials": {
