@@ -19,7 +19,12 @@ SPREADSHEET_NAME = 'shift_database'
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 
 try:
-    creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+    if 'GOOGLE_CREDENTIALS_JSON' in os.environ:
+        creds_dict = json.loads(os.environ['GOOGLE_CREDENTIALS_JSON'])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
+
     gc = gspread.authorize(creds)
     sheet = gc.open(SPREADSHEET_NAME)
     print("✅ Google Sheets に正常に接続しました")
