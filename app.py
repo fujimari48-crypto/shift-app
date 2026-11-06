@@ -365,7 +365,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
 
-                    <!-- ★ ここからシフト表マクロ -->
+                    <!-- シフト表マクロ -->
                     {% macro render_table(days_list) %}
                     <div class="table-responsive">
                         <table>
@@ -416,7 +416,7 @@ HTML_TEMPLATE = """
                                 </tr>
                                 {% endfor %}
 
-                                <!-- ★復活：人数集計行 -->
+                                <!-- 人数集計行 -->
                                 <tr style="background: #262626; border-top: 2px solid #D4AF37;">
                                     <td style="font-weight: bold; font-size: 11px;">現在の人員<br><small style="color: #888;">(過不足)</small></td>
                                     {% for day_info in days_list %}
@@ -638,6 +638,7 @@ SETTINGS_TEMPLATE = """
 </html>
 """
 
+# ★ 修正：確定シフトの「日付クリックでその日の出勤者モーダル表示」機能を復活させた STAFF_TEMPLATE
 STAFF_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -660,6 +661,9 @@ STAFF_TEMPLATE = """
         .staff-table { width: 100%; border-collapse: collapse; font-size: 12px; }
         .staff-table th, .staff-table td { border: 1px solid #333; padding: 8px; text-align: center; }
         .staff-table th { background: #262626; color: #D4AF37; }
+        .clickable-date { color: #D4AF37; cursor: pointer; text-decoration: underline; font-weight: bold; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center; }
+        .modal-content { background: #1E1E1E; padding: 20px; border-radius: 8px; width: 85%; max-width: 380px; border-left: 5px solid #D4AF37; }
     </style>
 </head>
 <body>
@@ -712,12 +716,17 @@ STAFF_TEMPLATE = """
         </div>
 
         <div id="t2" class="tab-content">
+            <p style="font-size:11px; color:#888; margin-top:0;">※日付をタップするとその日の出勤メンバーが表示されます</p>
             <table class="staff-table">
                 <tr><th>日付</th><th>シフト</th><th>時間</th></tr>
                 {% for d in all_days %}
                 {% set s = staff_shifts.get(d.full_date) %}
                 {% if s and s.shift != '-' %}
-                <tr><td>{{ d.date_str }}</td><td>{{ s.shift.split(' ')[0] }}</td><td>{{ s.time_display }}</td></tr>
+                <tr>
+                    <td><span class="clickable-date" onclick="window.staffActions.showDayMembers('{{ d.full_date }}', '{{ d.date_str }}({{ d.weekday }})')">{{ d.date_str }}({{ d.weekday }})</span></td>
+                    <td>{{ s.shift.split(' ')[0] }}</td>
+                    <td>{{ s.time_display }}</td>
+                </tr>
                 {% endif %}
                 {% endfor %}
             </table>
@@ -737,8 +746,18 @@ STAFF_TEMPLATE = """
                 {% endfor %}
             </table>
         </div>
+
+        <!-- 日付タップ時のメンバー一覧表示モーダル -->
+        <div id="memberModal" class="modal">
+            <div class="modal-content">
+                <h3 id="modalDateTitle" style="color:#D4AF37; margin-top:0; border-bottom:1px solid #333; padding-bottom:8px;"></h3>
+                <div id="modalMemberList" style="font-size:13px; line-height:1.6; max-height:250px; overflow-y:auto; margin-bottom:15px;"></div>
+                <button onclick="document.getElementById('memberModal').style.display='none'" style="background:#95a5a6; color:white; width:100%;">閉じる</button>
+            </div>
+        </div>
         
         <script>
+            const allPublishedShifts = {{ all_published_json|safe }};
             window.staffActions = {
                 switchTab: function(id, btn) {
                     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -757,6 +776,25 @@ STAFF_TEMPLATE = """
                     });
                     fetch('/api/submit_wish_shifts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name: document.getElementById('s_name').value, shifts: shifts }) })
                     .then(r => r.json()).then(d => { alert(d.message); location.reload(); }).catch(e => alert("通信エラー"));
+                },
+                showDayMembers: function(fullDate, dateDisplay) {
+                    document.getElementById('modalDateTitle').innerText = `📅 ${dateDisplay} の出勤メンバー`;
+                    const dayMembers = allPublishedShifts.filter(s => s.date === fullDate && s.shift !== '-' && s.shift !== '希望休');
+                    
+                    let html = '';
+                    if (dayMembers.length === 0) {
+                        html = '<p style="color:#888;">この日の出勤予定メンバーはいません。</p>';
+                    } else {
+                        html = '<table class="staff-table" style="width:100%;"><tr><th>名前</th><th>役割</th><th>時間</th></tr>';
+                        dayMembers.forEach(m => {
+                            const pos = m.shift.split(' ')[0];
+                            const timeStr = m.time ? (m.time.includes('-') ? m.time.replace('-', '〜') : m.time) : '時間指定なし';
+                            html += `<tr><td><strong>${m.staff_name}</strong></td><td>${pos}</td><td>${timeStr}</td></tr>`;
+                        });
+                        html += '</table>';
+                    }
+                    document.getElementById('modalMemberList').innerHTML = html;
+                    document.getElementById('memberModal').style.display = 'flex';
                 }
             };
         </script>
@@ -868,7 +906,7 @@ def staff_page():
     dl = deadline_settings['deadline']
     is_dl_pass = dl and datetime.now() > datetime.strptime(dl.replace('T', ' '), '%Y-%m-%d %H:%M')
     
-    return render_template_string(STAFF_TEMPLATE, short_name=SHORT_NAME, current_year=y, current_month=m, staffs=staffs_db, selected_staff=staff, logged_in=bool(staff), all_days=all_days, staff_wishes=w_data, staff_shifts=s_data, daily_work_details=details, time_options=TIME_OPTIONS, total_shift_days=days, total_hours=hours, est_pay=int(hours * staffs_db.get(staff, {}).get('hourly_wage', 1100)), deadline_str=dl.replace('T', ' ') if dl else '未設定', is_deadline_passed=is_dl_pass, auth_error=False)
+    return render_template_string(STAFF_TEMPLATE, short_name=SHORT_NAME, current_year=y, current_month=m, staffs=staffs_db, selected_staff=staff, logged_in=bool(staff), all_days=all_days, staff_wishes=w_data, staff_shifts=s_data, daily_work_details=details, time_options=TIME_OPTIONS, total_shift_days=days, total_hours=hours, est_pay=int(hours * staffs_db.get(staff, {}).get('hourly_wage', 1100)), deadline_str=dl.replace('T', ' ') if dl else '未設定', is_deadline_passed=is_dl_pass, auth_error=False, all_published_json=json.dumps(published_shifts_data, ensure_ascii=False))
 
 @app.route('/staff_login', methods=['POST'])
 def staff_login():
