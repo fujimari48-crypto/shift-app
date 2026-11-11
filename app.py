@@ -46,13 +46,7 @@ def get_ws(title, cols=10):
 default_data = {
     'shops': DEFAULT_SHOPS,
     'current_shop_id': 'shop1',
-    'staffs_db': {
-        '翔太': {'password': '0000', 'hourly_wage': 1100, 'default_position': 'K (キッチン)', 'shop_id': 'shop1'},
-        '健太': {'password': '0000', 'hourly_wage': 1100, 'default_position': 'K (キッチン)', 'shop_id': 'shop1'},
-        '美咲': {'password': '0000', 'hourly_wage': 1100, 'default_position': 'F (フロント)', 'shop_id': 'shop1'},
-        '葵': {'password': '0000', 'hourly_wage': 1100, 'default_position': 'F (フロント)', 'shop_id': 'shop2'},
-        '蓮': {'password': '0000', 'hourly_wage': 1200, 'default_position': 'Y (やきば)', 'shop_id': 'shop2'}
-    },
+    'staffs_db': {},
     'required_settings': {
         '月': {'K (キッチン)': 2, 'F (フロント)': 2, 'Y (やきば)': 1},
         '火': {'K (キッチン)': 2, 'F (フロント)': 2, 'Y (やきば)': 1},
@@ -75,7 +69,30 @@ def load_data():
         try:
             ws_staff = get_ws("Staff")
             staff_recs = ws_staff.get_all_records() if ws_staff else []
-            loaded_staffs = {str(r['name']): {'password': str(r['password']), 'hourly_wage': int(r['wage']), 'default_position': str(r['position']), 'shop_id': str(r.get('shop_id', 'shop1'))} for r in staff_recs} if staff_recs else default_data['staffs_db']
+            
+            loaded_staffs = {}
+            if staff_recs:
+                for r in staff_recs:
+                    r_clean = {str(k).strip(): v for k, v in r.items()}
+                    name = str(r_clean.get('name', '')).strip()
+                    if not name: continue
+                    try:
+                        wage = int(r_clean.get('wage', 1100))
+                    except:
+                        wage = 1100
+                    
+                    raw_pass = str(r_clean.get('password', '0000')).strip()
+                    if raw_pass == '0' or raw_pass == '':
+                        raw_pass = '0000'
+
+                    loaded_staffs[name] = {
+                        'password': raw_pass,
+                        'hourly_wage': wage,
+                        'default_position': str(r_clean.get('position', '')),
+                        'shop_id': str(r_clean.get('shop_id', 'shop1')).strip()
+                    }
+            else:
+                loaded_staffs = default_data['staffs_db']
 
             ws_settings = get_ws("Settings")
             set_recs = ws_settings.get_all_records() if ws_settings else []
@@ -99,7 +116,7 @@ def load_data():
 
             for data_list in [wishes_data, shifts_data, published_shifts_data, actual_shifts_data]:
                 for d in data_list: 
-                    d.update((k, str(v)) for k, v in d.items())
+                    d.update((str(k).strip(), str(v)) for k, v in d.items())
                     if 'shop_id' not in d: d['shop_id'] = 'shop1'
 
             return {
@@ -257,7 +274,6 @@ HTML_TEMPLATE = """
     <header>
         <h1><strong>{{ current_shop.name }}</strong> シフト管理</h1>
         <div style="display: flex; gap: 10px; align-items: center;">
-            <!-- 店舗切替ドロップダウン -->
             <select onchange="window.location.href='/?shop_id=' + this.value" style="font-size: 12px; padding: 4px; border-color: #D4AF37; font-weight: bold;">
                 {% for s in shops %}
                 <option value="{{ s.id }}" {% if s.id == current_shop.id %}selected{% endif %}>🏪 {{ s.name }}</option>
@@ -364,7 +380,6 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
 
-                    <!-- スタッフ情報変更 modal -->
                     <div id="passModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;">
                         <div class="card" style="width: 280px;">
                             <h3>🔑 スタッフ情報変更</h3>
@@ -384,7 +399,6 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
 
-                    <!-- スタッフ希望提出状況 -->
                     <div class="wish-box no-print">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <h3 style="margin: 0; color: #2E7D32; font-size: 15px;">📥 スタッフ希望提出状況 ({{ current_shop.short_name }})</h3>
@@ -417,7 +431,6 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
 
-                    <!-- シフト表 -->
                     {% macro render_table(days_list) %}
                     <div class="table-responsive">
                         <table>
@@ -652,7 +665,6 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# 設定画面: 店舗一覧の追加・編集フォーム
 SETTINGS_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -679,7 +691,6 @@ SETTINGS_TEMPLATE = """
             <aside><h2>メニュー</h2><a href="/">📊 シフト作成</a><a href="/admin/settings" style="background:#D4AF37; color:#121212;">⚙️ 設定</a></aside>
             
             <div style="display:flex; flex-direction:column; gap:15px;">
-                <!-- 店舗管理（追加・編集） -->
                 <div class="card">
                     <h3 style="color:#D4AF37; margin-top:0;">🏪 店舗の追加・名称変更</h3>
                     <div style="margin-bottom:12px;">
@@ -700,7 +711,6 @@ SETTINGS_TEMPLATE = """
                     </form>
                 </div>
 
-                <!-- パスワード変更 -->
                 <div class="card">
                     <h3 style="color:#D4AF37; margin-top:0;">🔒 管理者パスワード変更</h3>
                     <form onsubmit="event.preventDefault(); fetch('/api/update_password', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({new_password: document.getElementById('np').value})}).then(r=>r.json()).then(d=>{alert(d.message); location.reload();});">
@@ -715,6 +725,8 @@ SETTINGS_TEMPLATE = """
 </html>
 """
 
+# ★ 修正ポイント: スタッフのログイン画面（STAFF_TEMPLATE）
+# JavaScriptを仕込み、店舗のドロップダウンが変更されたら、瞬時に名前のリストも切り替わるようにしました。
 STAFF_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ja">
@@ -751,14 +763,42 @@ STAFF_TEMPLATE = """
         {% if not logged_in %}
         <form method="POST" action="/staff_login">
             <h2 style="margin-top:0; font-size:16px;">スタッフログイン</h2>
-            <select name="shop_id" required>
+            <!-- 店舗ドロップダウン -->
+            <select name="shop_id" id="login_shop_id" onchange="filterStaff()" required>
                 {% for s in shops %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
             </select>
-            <select name="name" required><option value="">名前を選択</option>{% for s in staffs.keys() %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+            <!-- 名前ドロップダウン（JavaScriptで自動更新されます） -->
+            <select name="name" id="login_staff_name" required>
+                <option value="">名前を選択</option>
+            </select>
             <input type="password" name="staff_password" placeholder="パスワード(初期: 0000)" required>
             <button type="submit">ログイン</button>
-            {% if auth_error %}<p style="color:red; font-size:12px;">エラー</p>{% endif %}
+            {% if auth_error %}<p style="color:#ff5252; font-size:12px; margin-top:8px; font-weight:bold;">⚠️ 店舗またはパスワードが間違っています。</p>{% endif %}
         </form>
+        
+        <!-- 自動でリストを切り替えるプログラム -->
+        <script>
+            const allStaffsDb = {{ all_staffs_json|safe }};
+            function filterStaff() {
+                const shopId = document.getElementById('login_shop_id').value;
+                const staffSelect = document.getElementById('login_staff_name');
+                // 一旦リストをリセット
+                staffSelect.innerHTML = '<option value="">名前を選択</option>';
+                // 選択された店舗に所属するスタッフだけを追加
+                for (const [name, info] of Object.entries(allStaffsDb)) {
+                    const shopIdForStaff = info.shop_id || 'shop1';
+                    if (shopIdForStaff === shopId) {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        staffSelect.appendChild(opt);
+                    }
+                }
+            }
+            // 画面が開いたときに最初の1回だけ実行
+            document.addEventListener('DOMContentLoaded', filterStaff);
+        </script>
+
         {% else %}
         <form method="GET" action="/staff" style="display:flex; gap:5px;">
             <select name="year" onchange="this.form.submit()"><option value="2025" {% if current_year == 2025 %}selected{% endif %}>2025年</option><option value="2026" {% if current_year == 2026 %}selected{% endif %}>2026年</option></select>
@@ -982,6 +1022,7 @@ def logout():
     session.pop('staff_shop_id', None)
     return redirect(url_for('index'))
 
+# ★ 修正ポイント: 全スタッフデータをフロントエンド（JavaScript）に送るようにしました
 @app.route('/staff')
 def staff_page():
     staff = session.get('logged_staff', '')
@@ -1037,6 +1078,8 @@ def staff_page():
     dl_f = deadline_settings.get('deadline_first', '未設定')
     dl_s = deadline_settings.get('deadline_second', '未設定')
     
+    auth_error = request.args.get('error') == '1'
+
     return render_template_string(
         STAFF_TEMPLATE,
         shops=shops,
@@ -1056,19 +1099,22 @@ def staff_page():
         est_pay=int(hours * shop_staffs.get(staff, {}).get('hourly_wage', 1100)),
         deadline_first_str=dl_f.replace('T', ' '),
         deadline_second_str=dl_s.replace('T', ' '),
-        auth_error=False,
-        all_published_json=json.dumps(shop_published, ensure_ascii=False)
+        auth_error=auth_error,
+        all_published_json=json.dumps(shop_published, ensure_ascii=False),
+        all_staffs_json=json.dumps(staffs_db, ensure_ascii=False)  # ← 追加: 全スタッフのデータを送る
     )
 
 @app.route('/staff_login', methods=['POST'])
 def staff_login():
     name = request.form.get('name')
     shop_id = request.form.get('shop_id', 'shop1')
-    if name in staffs_db and staffs_db[name]['password'] == request.form.get('staff_password'):
-        session['logged_staff'] = name
-        session['staff_shop_id'] = shop_id
-        return redirect(url_for('staff_page'))
-    return redirect(url_for('staff_page'))
+    if name in staffs_db:
+        if staffs_db[name].get('shop_id', 'shop1') == shop_id and staffs_db[name]['password'] == request.form.get('staff_password'):
+            session['logged_staff'] = name
+            session['staff_shop_id'] = shop_id
+            return redirect(url_for('staff_page'))
+    
+    return redirect(url_for('staff_page', error='1'))
 
 # --- API エンドポイント ---
 @app.route('/api/add_shop', methods=['POST'])
