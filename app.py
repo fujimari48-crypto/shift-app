@@ -111,6 +111,14 @@ def rows_to_dicts(rows):
         result.append(item)
     return result
 
+def get_next_staff_code(db_dict):
+    """未使用の連番シフト番号（101〜）を発行する"""
+    used = {str(info.get('staff_code', '')).strip() for info in db_dict.values()}
+    num = 101
+    while str(num) in used:
+        num += 1
+    return str(num)
+
 default_data = {
     'shops': DEFAULT_SHOPS,
     'current_shop_id': 'shop1',
@@ -139,13 +147,11 @@ def load_data():
     if sheet:
         with load_lock:
             try:
-                # 7シートを1回のAPIコールで一括取得（429エラー対策）
                 sheet_names = ["Staff", "Settings", "Wishes", "Shifts", "Published", "Actual", "TimeClock"]
                 try:
                     batch_res = sheet.values_batch_get(sheet_names)
                     value_ranges = batch_res.get('valueRanges', [])
                 except Exception:
-                    # シート未作成が混ざっている場合は作成してから再取得
                     for name in sheet_names:
                         get_ws(name)
                     batch_res = sheet.values_batch_get(sheet_names)
@@ -179,11 +185,16 @@ def load_data():
                         if raw_pass == '0' or raw_pass == '':
                             raw_pass = '0000'
 
+                        code = str(r_clean.get('staff_code', '')).strip()
+                        if not code:
+                            code = get_next_staff_code(loaded_staffs)
+
                         loaded_staffs[name] = {
                             'password': raw_pass,
                             'hourly_wage': wage,
                             'default_position': str(r_clean.get('position', '')),
-                            'shop_id': str(r_clean.get('shop_id', 'shop1')).strip()
+                            'shop_id': str(r_clean.get('shop_id', 'shop1')).strip(),
+                            'staff_code': code
                         }
                 else:
                     loaded_staffs = default_data['staffs_db']
@@ -224,7 +235,13 @@ def load_data():
 
     if os.path.exists(DATA_FILE):
         try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                sdb = data.get('staffs_db', {})
+                for info in sdb.values():
+                    if not info.get('staff_code'):
+                        info['staff_code'] = get_next_staff_code(sdb)
+                return data
         except: pass
     return default_data
 
@@ -241,7 +258,10 @@ def write_to_sheets(data_copy):
                 ws.clear()
                 if rows: ws.update(values=rows, range_name='A1')
 
-            staff_rows = [['name', 'password', 'wage', 'position', 'shop_id']] + [[name, info['password'], info['hourly_wage'], info['default_position'], info.get('shop_id', 'shop1')] for name, info in data_copy['staffs_db'].items()]
+            staff_rows = [['name', 'password', 'wage', 'position', 'shop_id', 'staff_code']] + [
+                [name, info['password'], info['hourly_wage'], info['default_position'], info.get('shop_id', 'shop1'), info.get('staff_code', '')]
+                for name, info in data_copy['staffs_db'].items()
+            ]
             update_ws("Staff", staff_rows)
 
             set_rows = [
@@ -295,7 +315,6 @@ actual_shifts_data, admin_credentials = app_data['actual_shifts_data'], app_data
 timeclock_logs = app_data.get('timeclock_logs', [])
 last_saved_str = get_now_jst().strftime('%H:%M:%S')
 
-# スプレッドシートの直接編集も拾えるよう120秒おきにバックグラウンド同期（1回1リクエストのみ消費）
 def background_auto_sync():
     global shops, staffs_db, required_settings, deadline_settings, wishes_data, shifts_data, published_shifts_data, actual_shifts_data, admin_credentials, timeclock_logs
     while True:
@@ -356,7 +375,7 @@ HTML_TEMPLATE = """
         header { background-color: #1E1E1E; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #D4AF37; position: fixed; top: 0; left: 0; width: 100%; z-index: 1000; box-sizing: border-box; flex-wrap: wrap; gap: 6px; }
         header h1 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; color: #D4AF37; }
         .container { display: flex; gap: 15px; padding: 75px 15px 15px 15px; flex-wrap: wrap; margin-bottom: 20px; flex: 1; }
-        aside { width: 180px; background-color: #1E1E1E; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
+        aside { width: 185px; background-color: #1E1E1E; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.5); }
         aside h2 { font-size: 15px; color: #D4AF37; border-bottom: 1px solid #D4AF37; padding-bottom: 8px; margin-top: 0; }
         aside ul { list-style: none; padding: 0; margin: 10px 0 0 0; }
         aside ul li { margin-bottom: 8px; }
@@ -392,6 +411,9 @@ HTML_TEMPLATE = """
         .badge-approved { background: #27ae60; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; }
         .save-indicator { font-size: 11px; color: #4caf50; background: #1a2e1a; padding: 4px 8px; border-radius: 4px; border: 1px solid #2e7d32; }
         .refresh-indicator { font-size: 11px; color: #64b5f6; background: #152232; padding: 4px 8px; border-radius: 4px; border: 1px solid #1976d2; }
+        .today-kpi { background: #262626; border: 1px solid #333; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px; display: inline-block; min-width: 200px; }
+        .today-kpi-label { font-size: 11px; color: #aaa; margin-bottom: 4px; }
+        .today-kpi-val { font-size: 22px; font-weight: bold; color: #FFA726; }
     </style>
 </head>
 <body>
@@ -407,7 +429,9 @@ HTML_TEMPLATE = """
                 <option value="{{ s.id }}" {% if s.id == current_shop.id %}selected{% endif %}>🏪 {{ s.name }}</option>
                 {% endfor %}
             </select>
+            {% if is_admin %}
             <a href="/logout"><button class="btn-danger" style="padding: 5px 10px; font-size: 11px;">ログアウト</button></a>
+            {% endif %}
         </div>
     </header>
 
@@ -415,10 +439,14 @@ HTML_TEMPLATE = """
         <div class="card" style="max-width: 350px; margin: 100px auto; padding: 25px;">
             <h2 style="text-align: center; color: #D4AF37; margin-top: 0;">🔒 管理者ログイン</h2>
             <form method="POST" action="/admin_login">
-                <input type="password" name="password" placeholder="パスワード" required style="padding: 8px;">
+                <input type="hidden" name="shop_id" value="{{ current_shop.id }}">
+                <input type="password" name="password" placeholder="管理者パスワード" required style="padding: 8px;" autofocus>
                 <button type="submit" style="padding: 8px;">ログイン</button>
             </form>
-            {% if login_error %}<div style="color:#FFA726; font-size:11px; margin-top:8px;">パスワードが間違っています。</div>{% endif %}
+            {% if login_error %}<div style="color:#ff5252; font-size:12px; margin-top:8px; font-weight:bold;">⚠️ パスワードが間違っています。</div>{% endif %}
+            <div style="margin-top: 15px; padding-top: 12px; border-top: 1px solid #333; text-align: center;">
+                <a href="/clock?shop_id={{ current_shop.id }}" style="color: #64b5f6; font-size: 12px; text-decoration: none;">⏱️ 店舗タイムカード画面へ戻る</a>
+            </div>
         </div>
     {% else %}
         <div class="container">
@@ -426,8 +454,7 @@ HTML_TEMPLATE = """
                 <h2>🖥️ 管理メニュー</h2>
                 <ul>
                     <li><a href="/" class="active">📊 シフト・勤怠管理</a></li>
-                    <li><a href="/clock?shop_id={{ current_shop.id }}" target="_blank" style="background: #2c3e50; color: #fff;">⏱️ 店舗打刻画面を開く</a></li>
-                    <li><a href="/staff" target="_blank">📱 スタッフ画面を開く</a></li>
+                    <li><a href="/clock_mode?shop_id={{ current_shop.id }}" onclick="return confirm('管理画面をロック（自動ログアウト）して、店舗打刻専用モードに切り替えますか？')" style="background: #2c3e50; color: #fff;">⏱️ 店舗打刻モードへ切替</a></li>
                     <li><a href="/admin/settings">⚙️ 店舗・パス設定</a></li>
                 </ul>
                 <button onclick="window.customActions.generateAutoShift()" style="width: 100%; margin-top: 12px; background: #8e44ad; padding: 8px; font-size: 12px; color: white;">🤖 自動シフト作成</button>
@@ -458,7 +485,7 @@ HTML_TEMPLATE = """
                     <button type="button" id="btn-tab-shift-create" class="admin-tab-btn active" onclick="window.customActions.switchAdminTab('tab-shift-create', this)">📊 シフト作成・管理</button>
                     <button type="button" id="btn-tab-actual-work" class="admin-tab-btn" onclick="window.customActions.switchAdminTab('tab-actual-work', this)">
                         💰 勤怠打刻承認・給料確定
-                        {% set pending_count = timeclock_logs|selectattr('approved', 'ne', '1')|list|length %}
+                        {% set pending_count = all_shop_timeclock|selectattr('approved', 'ne', '1')|list|length %}
                         {% if pending_count > 0 %}<span style="background:#e74c3c; color:white; padding:1px 6px; border-radius:10px; margin-left:4px;">{{ pending_count }}</span>{% endif %}
                     </button>
                 </div>
@@ -468,10 +495,11 @@ HTML_TEMPLATE = """
                     <div class="no-print" style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
                         <div class="card" style="flex: 1; min-width: 260px; margin-bottom: 0;">
                             <h3>バイトスタッフの管理 ({{ current_shop.short_name }} / {{ staffs|length }}名)</h3>
-                            <form onsubmit="window.customActions.submitAddStaff(event)" style="flex-direction: row; gap: 4px;">
-                                <input type="text" id="new_staff_name" placeholder="スタッフ名" required style="flex: 1;">
-                                <input type="number" id="new_staff_wage" placeholder="時給" value="1100" min="0" required style="width: 50px;">
-                                <select id="new_staff_pos" style="flex: 1;">
+                            <form onsubmit="window.customActions.submitAddStaff(event)" style="flex-direction: row; gap: 4px; flex-wrap: wrap;">
+                                <input type="text" id="new_staff_code" placeholder="番号(自動)" style="width: 65px;">
+                                <input type="text" id="new_staff_name" placeholder="スタッフ名" required style="flex: 1; min-width: 80px;">
+                                <input type="number" id="new_staff_wage" placeholder="時給" value="1100" min="0" required style="width: 55px;">
+                                <select id="new_staff_pos" style="width: 85px;">
                                     <option value="">基本なし</option><option value="K (キッチン)">キッチン</option><option value="F (フロント)">フロント</option><option value="Y (やきば)">やきば</option>
                                 </select>
                                 <button type="submit" class="btn-green" style="padding: 5px 8px;">追加</button>
@@ -479,8 +507,8 @@ HTML_TEMPLATE = """
                             <div class="staff-grid">
                                 {% for staff, info in staffs.items() %}
                                 <div class="staff-chip">
-                                    <button type="button" class="staff-name-btn" onclick="window.customActions.openPassModal('{{ staff }}', {{ info.hourly_wage }}, '{{ info.default_position }}')">
-                                        🔑 {{ staff }} <span style="font-size: 9px; color: #D4AF37;">[{{ info.default_position.split(' ')[0] if info.default_position else '無' }}]</span>
+                                    <button type="button" class="staff-name-btn" onclick="window.customActions.openPassModal('{{ staff }}', {{ info.hourly_wage }}, '{{ info.default_position }}', '{{ info.staff_code }}')">
+                                        <span style="color:#64b5f6; font-size:10px;">No.{{ info.staff_code }}</span> {{ staff }} <span style="font-size: 9px; color: #D4AF37;">[{{ info.default_position.split(' ')[0] if info.default_position else '無' }}]</span>
                                     </button>
                                     <button onclick="window.customActions.deleteStaff('{{ staff }}')" class="btn-danger" style="padding: 1px 4px; font-size: 9px;">削除</button>
                                 </div>
@@ -519,6 +547,8 @@ HTML_TEMPLATE = """
                         <div class="card" style="width: 280px;">
                             <h3>🔑 スタッフ情報変更</h3>
                             <p id="modalStaffLabel" style="font-size: 12px; color: #FFA726; margin-bottom: 8px;"></p>
+                            <label style="font-size: 11px; display: block;">シフト番号 (ログイン・打刻共通):</label>
+                            <input type="text" id="modalNewCode" style="width: 100%; margin-bottom: 6px;" placeholder="例: 101">
                             <label style="font-size: 11px; display: block;">基本ポジション:</label>
                             <select id="modalNewPos" style="width: 100%; margin-bottom: 6px;">
                                 <option value="">設定なし</option><option value="K (キッチン)">キッチン</option><option value="F (フロント)">フロント</option><option value="Y (やきば)">やきば</option>
@@ -540,10 +570,10 @@ HTML_TEMPLATE = """
                             <button onclick="window.customActions.applyAllWishes()" class="btn-green" style="padding: 5px 10px; font-size: 11px;">📥 全希望を一括反映</button>
                         </div>
                         <div class="wish-card-grid">
-                            {% for staff in staffs.keys() %}
+                            {% for staff, info in staffs.items() %}
                             <div class="wish-card">
                                 <div class="wish-card-header">
-                                    <span>👤 {{ staff }}</span>
+                                    <span>👤 {{ staff }} <small style="color:#64b5f6;">(No.{{ info.staff_code }})</small></span>
                                 </div>
                                 {% set staff_wishes = [] %}
                                 {% for w in wishes %}{% if w.staff_name == staff %}{% set _ = staff_wishes.append(w) %}{% endif %}{% endfor %}
@@ -580,7 +610,7 @@ HTML_TEMPLATE = """
                             <tbody>
                                 {% for staff, s_info in staffs.items() %}
                                 <tr>
-                                    <td>{{ staff }}<br><small style="color: #888;">({{ s_info.default_position.split(' ')[0] if s_info.default_position else '無' }})</small></td>
+                                    <td><small style="color:#64b5f6;">No.{{ s_info.staff_code }}</small> {{ staff }}<br><small style="color: #888;">({{ s_info.default_position.split(' ')[0] if s_info.default_position else '無' }})</small></td>
                                     {% for day_info in days_list %}
                                     <td>
                                         {% set current_shift = namespace(val='-', start='', end='') %}
@@ -650,11 +680,45 @@ HTML_TEMPLATE = """
 
                 <!-- タブ2: 勤怠打刻承認・給料確定 -->
                 <div id="tab-actual-work" class="admin-tab-content">
+                    <!-- 本日の人件費サマリー -->
+                    <div class="card" style="border-left-color: #3498db;">
+                        <h3>💰 本日（{{ today_date_str }}）のトータル人件費</h3>
+                        <div class="today-kpi">
+                            <div class="today-kpi-label">本日のトータル人件費</div>
+                            <div class="today-kpi-val">￥{{ "{:,}".format(today_labor_summary.total_pay) }}</div>
+                        </div>
+                        {% if today_labor_summary.staff_items|length > 0 %}
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;">
+                            {% for item in today_labor_summary.staff_items %}
+                            <div style="background:#181818; border:1px solid #333; padding:5px 10px; border-radius:4px; font-size:11px;">
+                                <strong>{{ item.name }}</strong>：{{ item.hours }}h / <span style="color:#FFA726;">￥{{ "{:,}".format(item.pay) }}</span>
+                                {% if item.is_confirmed %}<span style="color:#4caf50; font-size:9px;">(確定)</span>{% else %}<span style="color:#e67e22; font-size:9px;">(見込)</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p style="font-size:11px; color:#777; margin:0;">※本日の出退勤完了データは現在0件です（退勤打刻または確定後に自動集計されます）。</p>
+                        {% endif %}
+                    </div>
+
                     <div class="card" style="border-left-color: #e67e22;">
-                        <h3>⏱️ 店舗打刻ログ（30分単位自動丸め・最終確定）</h3>
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-bottom:1px solid #333; padding-bottom:8px; margin-bottom:8px;">
+                            <h3 style="border:none; padding:0; margin:0;">⏱️ 店舗打刻ログ（30分単位自動丸め・最終確定）</h3>
+                            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                                <select onchange="window.location.href='/?shop_id={{ current_shop.id }}&year={{ current_year }}&month={{ current_month }}&week_idx={{ selected_week_idx }}&tc_view=' + this.value" style="font-size:11px; padding:4px 8px; border-color:#e67e22;">
+                                    <option value="today" {% if tc_view == 'today' %}selected{% endif %}>📅 本日分のみ（未確定含む）</option>
+                                    <option value="month" {% if tc_view == 'month' %}selected{% endif %}>🗓️ {{ month_title }}の全ログを表示</option>
+                                </select>
+                                {% if tc_view == 'month' and timeclock_logs|length > 0 %}
+                                <button type="button" onclick="window.customActions.deleteMonthTimeclock('{{ current_year }}', '{{ current_month }}')" class="btn-danger" style="padding:4px 8px; font-size:11px;">
+                                    🗑️ {{ month_title }}分をすべて削除
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
                         <p style="font-size: 11px; color: #aaa; margin-top: 0;">
-                            ※出勤は30分単位で<strong>切り上げ</strong>、退勤は<strong>切り捨て</strong>で自動計算されています（深夜5時までの日付またぎ対応）。<br>
-                            ※「✅ 承認して確定」を押すまで、下の給料一覧やスタッフの勤務履歴には反映されません。
+                            ※全打刻データはGoogle Sheets（TimeClockシート）に自動保存されます。管理画面の初期表示は<strong>本日分（＋未確定分）のみ</strong>です。<br>
+                            ※月別表示に切り替えると、不要になった月のログを1ヶ月単位で一括削除できます（確定済みの給料計算データは消えません）。
                         </p>
                         <div class="table-responsive" style="max-height: 320px;">
                             <table>
@@ -665,12 +729,21 @@ HTML_TEMPLATE = """
                                         <th>スタッフ名</th>
                                         <th>生打刻 (出〜退)</th>
                                         <th>30分丸め確定時間 (編集可)</th>
+                                        <th>時間 / 人件費</th>
                                         <th>操作</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% if timeclock_logs|length == 0 %}
-                                    <tr><td colspan="6" style="color:#777;">まだ打刻データはありません</td></tr>
+                                    <tr>
+                                        <td colspan="7" style="color:#777;">
+                                            {% if tc_view == 'today' %}
+                                                本日分（および未確定）の打刻データはありません
+                                            {% else %}
+                                                {{ month_title }}の打刻データはありません
+                                            {% endif %}
+                                        </td>
+                                    </tr>
                                     {% else %}
                                     {% for log in timeclock_logs|reverse %}
                                     <tr>
@@ -690,6 +763,13 @@ HTML_TEMPLATE = """
                                             <input type="text" id="approve_in_{{ log.id }}" value="{{ log.rounded_in or log.clock_in }}" style="width:55px; text-align:center;" placeholder="17:00">
                                             〜
                                             <input type="text" id="approve_out_{{ log.id }}" value="{{ log.rounded_out or log.clock_out }}" style="width:55px; text-align:center;" placeholder="02:00">
+                                        </td>
+                                        <td>
+                                            {% if log.calc_hours > 0 %}
+                                                <strong>{{ log.calc_hours }}h</strong> / <span style="color:#FFA726;">￥{{ "{:,}".format(log.calc_pay) }}</span>
+                                            {% else %}
+                                                <span style="color:#777;">-</span>
+                                            {% endif %}
                                         </td>
                                         <td>
                                             <button onclick="window.customActions.approveTimeclock('{{ log.id }}', '{{ log.staff_name }}', '{{ log.date }}')" class="btn-green" style="padding: 4px 8px; font-size: 11px;">
@@ -746,11 +826,12 @@ HTML_TEMPLATE = """
                         <p style="font-size: 11px; color: #aaa; margin-top: 0;">※管理者が承認・確定した勤怠データ（30分単位）のみから算出された確定給料です（スタッフ画面には給料は表示されません）。</p>
                         <div class="table-responsive">
                             <table>
-                                <thead><tr><th>スタッフ名</th><th>基本ポジション</th><th>時給</th><th>確定出勤日数</th><th>総労働時間</th><th>概算給料</th></tr></thead>
+                                <thead><tr><th>シフト番号</th><th>スタッフ名</th><th>基本ポジション</th><th>時給</th><th>確定出勤日数</th><th>総労働時間</th><th>概算給料</th></tr></thead>
                                 <tbody>
                                     {% for staff, info in staffs.items() %}
                                     {% set summary = admin_staff_summaries.get(staff, {'days': 0, 'hours': 0.0, 'pay': 0}) %}
                                     <tr>
+                                        <td style="color:#64b5f6; font-weight:bold;">{{ info.staff_code }}</td>
                                         <td><strong>{{ staff }}</strong></td>
                                         <td>{{ info.default_position.split(' ')[0] if info.default_position else '無' }}</td>
                                         <td>{{ info.hourly_wage }} 円</td>
@@ -768,7 +849,6 @@ HTML_TEMPLATE = """
         </div>
 
         <script>
-            // リアルタイム人員カウント再計算関数
             function recalculateCountsForDate(date) {
                 let k = 0, f = 0, y = 0;
                 document.querySelectorAll(`.shift-pos-select[data-date="${date}"]`).forEach(sel => {
@@ -792,7 +872,6 @@ HTML_TEMPLATE = """
                 });
             }
 
-            // アクティブタブ復元
             const savedTab = sessionStorage.getItem('adminActiveTab');
             if (savedTab && document.getElementById(savedTab)) {
                 document.querySelectorAll('.admin-tab-content').forEach(c => c.classList.remove('active'));
@@ -802,7 +881,6 @@ HTML_TEMPLATE = """
                 if (btn) btn.classList.add('active');
             }
 
-            // 30秒カウントダウン＆自動更新
             let secondsLeft = 30;
             setInterval(() => {
                 secondsLeft--;
@@ -836,15 +914,28 @@ HTML_TEMPLATE = """
                     document.getElementById(tabId).classList.add('active');
                     btnElement.classList.add('active');
                 },
-                openPassModal: function(name, currentWage, defaultPos) {
+                openPassModal: function(name, currentWage, defaultPos, staffCode) {
                     this.targetStaffForPass = name;
                     document.getElementById('modalStaffLabel').innerText = `「${name}」さんの情報変更`;
-                    document.getElementById('modalNewPass').value = ''; document.getElementById('modalNewWage').value = currentWage; document.getElementById('modalNewPos').value = defaultPos || '';
+                    document.getElementById('modalNewCode').value = staffCode || '';
+                    document.getElementById('modalNewPass').value = '';
+                    document.getElementById('modalNewWage').value = currentWage;
+                    document.getElementById('modalNewPos').value = defaultPos || '';
                     document.getElementById('passModal').style.display = 'flex';
                 },
                 closePassModal: function() { document.getElementById('passModal').style.display = 'none'; },
                 submitPassModal: function() {
-                    fetch('/api/update_staff_info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ staff_name: this.targetStaffForPass, new_password: document.getElementById('modalNewPass').value, new_wage: document.getElementById('modalNewWage').value, default_position: document.getElementById('modalNewPos').value }) })
+                    fetch('/api/update_staff_info', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            staff_name: this.targetStaffForPass,
+                            staff_code: document.getElementById('modalNewCode').value.trim(),
+                            new_password: document.getElementById('modalNewPass').value,
+                            new_wage: document.getElementById('modalNewWage').value,
+                            default_position: document.getElementById('modalNewPos').value
+                        })
+                    })
                     .then(res => res.json()).then(data => { alert(data.message); this.closePassModal(); if(data.success) location.reload(); }).catch(e => alert("通信エラー"));
                 },
                 generateAutoShift: function() {
@@ -866,7 +957,17 @@ HTML_TEMPLATE = """
                 },
                 submitAddStaff: function(e) {
                     e.preventDefault();
-                    fetch('/api/add_staff', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shop_id: this.currentShopId, name: document.getElementById('new_staff_name').value, wage: document.getElementById('new_staff_wage').value, default_position: document.getElementById('new_staff_pos').value }) })
+                    fetch('/api/add_staff', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            shop_id: this.currentShopId,
+                            staff_code: document.getElementById('new_staff_code').value.trim(),
+                            name: document.getElementById('new_staff_name').value,
+                            wage: document.getElementById('new_staff_wage').value,
+                            default_position: document.getElementById('new_staff_pos').value
+                        })
+                    })
                     .then(res => res.json()).then(data => { alert(data.message); if(data.success) location.reload(); }).catch(e => alert("通信エラー"));
                 },
                 deleteStaff: function(name) {
@@ -926,8 +1027,18 @@ HTML_TEMPLATE = """
                     }).then(res => res.json()).then(data => { alert(data.message); if(data.success) location.reload(); }).catch(e => alert("通信エラー"));
                 },
                 deleteTimeclock: function(logId) {
-                    if(confirm('この打刻ログを削除しますか？')) {
+                    if(confirm('この打刻ログをスプレッドシートから削除しますか？')) {
                         fetch('/api/delete_timeclock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: logId }) })
+                        .then(res => res.json()).then(data => { alert(data.message); if(data.success) location.reload(); }).catch(e => alert("通信エラー"));
+                    }
+                },
+                deleteMonthTimeclock: function(year, month) {
+                    if(confirm(`【警告】${year}年${month}月の打刻ログをスプレッドシートからすべて削除しますか？\n（※すでに承認・確定した給料計算用の実績データは消えずに残ります）`)) {
+                        fetch('/api/delete_month_timeclock', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ shop_id: this.currentShopId, year: year, month: month })
+                        })
                         .then(res => res.json()).then(data => { alert(data.message); if(data.success) location.reload(); }).catch(e => alert("通信エラー"));
                     }
                 }
@@ -1016,7 +1127,7 @@ CLOCK_TEMPLATE = """
     <title>⏱️ タイムカード打刻 - {{ current_shop.short_name }}</title>
     <style>
         body { font-family: 'Noto Sans JP', sans-serif; margin: 0; background: #0f0f0f; color: #E0E0E0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-        header { background: #1E1E1E; padding: 12px 20px; border-bottom: 2px solid #D4AF37; width: 100%; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; }
+        header { background: #1E1E1E; padding: 12px 20px; border-bottom: 2px solid #D4AF37; width: 100%; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .clock-box { text-align: center; margin: 20px 0 10px 0; }
         .date-disp { font-size: 16px; color: #aaa; }
         .time-disp { font-size: 48px; font-weight: bold; color: #D4AF37; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
@@ -1029,15 +1140,36 @@ CLOCK_TEMPLATE = """
         .status-list { margin-top: 20px; width: 90%; max-width: 460px; }
         .status-item { background: #1a1a1a; padding: 10px 14px; border-radius: 6px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #27ae60; font-size: 14px; }
         .status-item.done { border-left-color: #777; color: #888; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
+        .modal-box { background: #1E1E1E; padding: 22px; border-radius: 10px; width: 88%; max-width: 340px; border-left: 5px solid #D4AF37; box-shadow: 0 8px 20px rgba(0,0,0,0.8); }
+        .staff-preview { text-align: center; font-size: 15px; font-weight: bold; padding: 8px; border-radius: 6px; background: #161616; margin-bottom: 12px; border: 1px solid #333; min-height: 22px; }
     </style>
 </head>
 <body>
     <header>
         <div style="font-weight:bold; color:#D4AF37;">⏱️ {{ current_shop.name }} タイムカード</div>
-        <select onchange="window.location.href='/clock?shop_id=' + this.value" style="width:auto; padding:5px; margin:0; font-size:12px;">
-            {% for s in shops %}<option value="{{ s.id }}" {% if s.id == current_shop.id %}selected{% endif %}>{{ s.short_name }}</option>{% endfor %}
-        </select>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" onclick="openAdminAuthModal()" style="width:auto; margin:0; background:#262626; color:#aaa; padding:6px 10px; border-radius:4px; font-size:11px; border:1px solid #444;">🔒 管理者メニュー</button>
+        </div>
     </header>
+
+    <div id="adminAuthModal" class="modal-overlay">
+        <div class="modal-box">
+            <h3 style="margin-top:0; color:#D4AF37; font-size:16px;">🔒 管理者認証</h3>
+            <p style="font-size:12px; color:#aaa; margin-bottom:12px;">管理画面への移動や店舗切り替えには管理者パスワードが必要です。</p>
+            <input type="password" id="modalAdminPass" placeholder="管理者パスワードを入力" style="font-size:14px; padding:10px; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <button type="button" onclick="closeAdminAuthModal()" style="background:#555; color:white; padding:10px; font-size:13px; margin:0;">キャンセル</button>
+                <button type="button" onclick="submitAdminReturn()" style="background:#D4AF37; color:#121212; padding:10px; font-size:13px; margin:0;">管理画面へ移動</button>
+            </div>
+            <div style="border-top:1px solid #333; padding-top:10px;">
+                <label style="font-size:11px; color:#888; display:block; margin-bottom:4px;">または店舗を切り替え（管理者パスワード入力後に選択）:</label>
+                <select id="modalShopSelect" onchange="switchClockShop()" style="font-size:13px; padding:8px; margin:0;">
+                    {% for s in shops %}<option value="{{ s.id }}" {% if s.id == current_shop.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
 
     {% if not clock_unlocked %}
     <div class="card" style="margin-top: 60px;">
@@ -1057,13 +1189,9 @@ CLOCK_TEMPLATE = """
     </div>
 
     <div class="card">
-        <select id="clock_staff_name">
-            <option value="">👤 自分の名前を選択してください</option>
-            {% for s in staffs.keys() %}
-            <option value="{{ s }}">{{ s }}</option>
-            {% endfor %}
-        </select>
-        <input type="password" id="clock_staff_pass" placeholder="🔑 個人パスワード (初期: 0000)">
+        <input type="text" id="clock_staff_code" inputmode="numeric" pattern="[0-9]*" placeholder="🔢 シフト番号を入力 (例: 101)" oninput="lookupStaffByCode()" style="text-align:center; font-size:20px; font-weight:bold; letter-spacing:2px; margin-bottom:8px;">
+        <div id="staffNamePreview" class="staff-preview" style="color:#777;">番号を入力すると名前が表示されます</div>
+        <input type="password" id="clock_staff_pass" inputmode="numeric" placeholder="🔑 個人パスワード (初期: 0000)" style="text-align:center; font-size:18px; letter-spacing:3px;">
         <div style="display:flex; gap:10px; margin-top:5px;">
             <button type="button" class="btn-in" onclick="submitClock('in')">☀️ 出勤</button>
             <button type="button" class="btn-out" onclick="submitClock('out')">🌙 退勤</button>
@@ -1089,6 +1217,76 @@ CLOCK_TEMPLATE = """
     </div>
 
     <script>
+        const shopStaffCodeMap = {{ staff_code_map_json|safe }};
+
+        function lookupStaffByCode() {
+            const code = document.getElementById('clock_staff_code').value.trim();
+            const previewEl = document.getElementById('staffNamePreview');
+            if (!code) {
+                previewEl.innerText = '番号を入力すると名前が表示されます';
+                previewEl.style.color = '#777';
+                return;
+            }
+            if (shopStaffCodeMap[code]) {
+                previewEl.innerText = `👤 ${shopStaffCodeMap[code]} さん`;
+                previewEl.style.color = '#4caf50';
+            } else {
+                previewEl.innerText = '⚠️ 該当する番号が見つかりません';
+                previewEl.style.color = '#ff5252';
+            }
+        }
+
+        function openAdminAuthModal() {
+            document.getElementById('modalAdminPass').value = '';
+            document.getElementById('adminAuthModal').style.display = 'flex';
+            setTimeout(() => document.getElementById('modalAdminPass').focus(), 100);
+        }
+        function closeAdminAuthModal() {
+            document.getElementById('adminAuthModal').style.display = 'none';
+        }
+        function submitAdminReturn() {
+            const pw = document.getElementById('modalAdminPass').value;
+            if (!pw) { alert('管理者パスワードを入力してください'); return; }
+            fetch('/api/verify_admin_return', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    window.location.href = '/?shop_id={{ current_shop.id }}';
+                } else {
+                    alert('⚠️ 管理者パスワードが違います');
+                }
+            })
+            .catch(() => alert('通信エラー'));
+        }
+        function switchClockShop() {
+            const pw = document.getElementById('modalAdminPass').value;
+            const targetShop = document.getElementById('modalShopSelect').value;
+            if (!pw) {
+                alert('店舗を切り替えるには、先に上の欄に管理者パスワードを入力してください');
+                document.getElementById('modalShopSelect').value = '{{ current_shop.id }}';
+                return;
+            }
+            fetch('/api/verify_admin_return', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pw, keep_clock_mode: true })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    window.location.href = '/clock?shop_id=' + targetShop;
+                } else {
+                    alert('⚠️ 管理者パスワードが違います');
+                    document.getElementById('modalShopSelect').value = '{{ current_shop.id }}';
+                }
+            })
+            .catch(() => alert('通信エラー'));
+        }
+
         function updateClock() {
             const now = new Date();
             const days = ['日', '月', '火', '水', '木', '金', '土'];
@@ -1111,9 +1309,10 @@ CLOCK_TEMPLATE = """
             const infoEl = document.getElementById('clockRefreshInfo');
             if (infoEl) infoEl.innerText = `🔄 自動更新まで ${clockSec}秒`;
             if (clockSec <= 0) {
-                const nameVal = document.getElementById('clock_staff_name').value;
+                const codeVal = document.getElementById('clock_staff_code').value;
                 const passVal = document.getElementById('clock_staff_pass').value;
-                if (!nameVal && !passVal) {
+                const modalOpen = document.getElementById('adminAuthModal').style.display === 'flex';
+                if (!codeVal && !passVal && !modalOpen) {
                     location.reload();
                 } else {
                     clockSec = 10;
@@ -1122,9 +1321,9 @@ CLOCK_TEMPLATE = """
         }, 1000);
 
         function submitClock(actionType) {
-            const staffName = document.getElementById('clock_staff_name').value;
+            const staffCode = document.getElementById('clock_staff_code').value.trim();
             const pass = document.getElementById('clock_staff_pass').value;
-            if (!staffName) { alert('名前を選択してください'); return; }
+            if (!staffCode) { alert('シフト番号を入力してください'); return; }
             if (!pass) { alert('個人パスワードを入力してください'); return; }
 
             fetch('/api/timeclock', {
@@ -1132,7 +1331,7 @@ CLOCK_TEMPLATE = """
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     shop_id: '{{ current_shop.id }}',
-                    staff_name: staffName,
+                    staff_code: staffCode,
                     password: pass,
                     action: actionType
                 })
@@ -1164,7 +1363,7 @@ STAFF_TEMPLATE = """
         body { font-family: sans-serif; margin: 0; background: #121212; color: #E0E0E0; }
         header { background: #1E1E1E; padding: 15px; border-bottom: 2px solid #D4AF37; display: flex; justify-content: space-between; align-items: center; }
         .card { background: #1E1E1E; padding: 20px; border-radius: 8px; max-width: 480px; margin: 20px auto; width: 90%; border-left: 5px solid #D4AF37; }
-        select, input, button { padding: 8px; width: 100%; box-sizing: border-box; margin-bottom: 10px; background: #262626; color: white; border: 1px solid #333; border-radius: 4px; }
+        select, input, button { padding: 10px; width: 100%; box-sizing: border-box; margin-bottom: 10px; background: #262626; color: white; border: 1px solid #333; border-radius: 4px; font-size: 14px; }
         button { background: #D4AF37; color: #121212; font-weight: bold; cursor: pointer; border: none; }
         .tab-menu { display: flex; gap: 4px; margin-bottom: 15px; }
         .tab-btn { flex: 1; padding: 8px 4px; background: #333; text-align: center; border-radius: 4px; cursor: pointer; font-size:12px; }
@@ -1178,6 +1377,7 @@ STAFF_TEMPLATE = """
         .clickable-date { color: #D4AF37; cursor: pointer; text-decoration: underline; font-weight: bold; }
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center; }
         .modal-content { background: #1E1E1E; padding: 20px; border-radius: 8px; width: 85%; max-width: 380px; border-left: 5px solid #D4AF37; }
+        .login-preview { text-align: center; font-size: 13px; font-weight: bold; padding: 8px; border-radius: 4px; background: #161616; margin-bottom: 10px; border: 1px solid #333; }
     </style>
 </head>
 <body>
@@ -1186,47 +1386,58 @@ STAFF_TEMPLATE = """
         <div style="display:flex; gap:10px; align-items:center;">
             {% if logged_in %}
             <button onclick="window.staffActions.manualRefresh()" style="width:auto; margin:0; padding:4px 8px; font-size:11px; background:#3498db; color:white;">🔄 最新更新</button>
+            <a href="/staff_logout" style="color:#FFA726; font-size:12px; text-decoration:none;">ログアウト</a>
             {% endif %}
-            <a href="/logout" style="color:#FFA726; font-size:12px; text-decoration:none;">ログアウト</a>
         </div>
     </header>
     <div class="card">
         {% if not logged_in %}
         <form method="POST" action="/staff_login">
-            <h2 style="margin-top:0; font-size:16px;">スタッフログイン</h2>
-            <select name="shop_id" id="login_shop_id" onchange="filterStaff()" required>
+            <h2 style="margin-top:0; font-size:16px; color:#D4AF37;">👤 スタッフログイン</h2>
+            <p style="font-size:11px; color:#aaa; margin-top:0;">店舗タイムカードと同じシフト番号・パスワードでログインできます。</p>
+            <select name="shop_id" id="login_shop_id" onchange="previewLoginStaff()" required>
                 {% for s in shops %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
             </select>
-            <select name="name" id="login_staff_name" required>
-                <option value="">名前を選択</option>
-            </select>
-            <input type="password" name="staff_password" placeholder="パスワード(初期: 0000)" required>
+            <input type="text" name="staff_code" id="login_staff_code" inputmode="numeric" pattern="[0-9]*" placeholder="🔢 シフト番号を入力 (例: 101)" oninput="previewLoginStaff()" required style="text-align:center; font-size:16px; font-weight:bold; letter-spacing:2px;">
+            <div id="loginStaffPreview" class="login-preview" style="color:#777;">番号を入力すると名前が表示されます</div>
+            <input type="password" name="staff_password" inputmode="numeric" placeholder="🔑 パスワード (初期: 0000)" required style="text-align:center;">
             <button type="submit">ログイン</button>
-            {% if auth_error %}<p style="color:#ff5252; font-size:12px; margin-top:8px; font-weight:bold;">⚠️ 店舗またはパスワードが間違っています。</p>{% endif %}
+            {% if auth_error %}<p style="color:#ff5252; font-size:12px; margin-top:8px; font-weight:bold;">⚠️ 店舗・シフト番号・パスワードのいずれかが間違っています。</p>{% endif %}
         </form>
         
         <script>
             const allStaffsDb = {{ all_staffs_json|safe }};
-            function filterStaff() {
+            function previewLoginStaff() {
                 const shopId = document.getElementById('login_shop_id').value;
-                const staffSelect = document.getElementById('login_staff_name');
-                staffSelect.innerHTML = '<option value="">名前を選択</option>';
+                const code = document.getElementById('login_staff_code').value.trim();
+                const previewEl = document.getElementById('loginStaffPreview');
+                if (!code) {
+                    previewEl.innerText = '番号を入力すると名前が表示されます';
+                    previewEl.style.color = '#777';
+                    return;
+                }
+                let matchedName = '';
                 for (const [name, info] of Object.entries(allStaffsDb)) {
-                    const shopIdForStaff = info.shop_id || 'shop1';
-                    if (shopIdForStaff === shopId) {
-                        const opt = document.createElement('option');
-                        opt.value = name;
-                        opt.textContent = name;
-                        staffSelect.appendChild(opt);
+                    const sId = info.shop_id || 'shop1';
+                    const sCode = String(info.staff_code || '').trim();
+                    if (sId === shopId && sCode === code) {
+                        matchedName = name;
+                        break;
                     }
                 }
+                if (matchedName) {
+                    previewEl.innerText = `👤 ${matchedName} さん`;
+                    previewEl.style.color = '#4caf50';
+                } else {
+                    previewEl.innerText = '⚠️ 選択中の店舗に該当番号がありません';
+                    previewEl.style.color = '#ff5252';
+                }
             }
-            document.addEventListener('DOMContentLoaded', filterStaff);
         </script>
 
         {% else %}
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <span style="font-size:13px; color:#D4AF37; font-weight:bold;">👤 {{ selected_staff }} さん</span>
+            <span style="font-size:13px; color:#D4AF37; font-weight:bold;">👤 {{ selected_staff }} さん <small style="color:#64b5f6;">(No.{{ staff_code }})</small></span>
             <span id="staffRefreshCountdown" style="font-size:10px; color:#64b5f6;">🔄 自動更新まで 30秒</span>
         </div>
         <form method="GET" action="/staff" style="display:flex; gap:5px;">
@@ -1412,6 +1623,7 @@ def index():
     is_admin = session.get('is_admin', False)
     shop_id = request.args.get('shop_id', session.get('active_shop_id', 'shop1'))
     session['active_shop_id'] = shop_id
+    login_error = request.args.get('error') == '1'
 
     current_shop = next((s for s in shops if s['id'] == shop_id), shops[0])
 
@@ -1419,13 +1631,72 @@ def index():
     today_biz_str = get_business_date(today)
     year, month = int(request.args.get('year', today.year)), int(request.args.get('month', today.month))
     week_idx = request.args.get('week_idx', 'all')
+    tc_view = request.args.get('tc_view', 'today')
     first_half, second_half, month_title = get_month_days(year, month)
     
     shop_staffs = {name: info for name, info in staffs_db.items() if info.get('shop_id', 'shop1') == shop_id}
     shop_wishes = [w for w in wishes_data if w.get('shop_id', 'shop1') == shop_id]
     shop_shifts = [s for s in shifts_data if s.get('shop_id', 'shop1') == shop_id]
     shop_actual = [a for a in actual_shifts_data if a.get('shop_id', 'shop1') == shop_id]
-    shop_timeclock = [t for t in timeclock_logs if t.get('shop_id', 'shop1') == shop_id]
+    all_shop_timeclock = [t for t in timeclock_logs if t.get('shop_id', 'shop1') == shop_id]
+
+    target_ym_prefix = f"{year}-{month:02d}-"
+    if tc_view == 'month':
+        raw_filtered = [t for t in all_shop_timeclock if t.get('date', '').startswith(target_ym_prefix)]
+    else:
+        raw_filtered = [t for t in all_shop_timeclock if t.get('date') == today_biz_str or t.get('approved') != '1']
+
+    filtered_timeclock = []
+    for t in raw_filtered:
+        t_copy = dict(t)
+        r_in = t_copy.get('rounded_in') or t_copy.get('clock_in', '')
+        r_out = t_copy.get('rounded_out') or t_copy.get('clock_out', '')
+        mins = calc_work_minutes(f"{r_in}-{r_out}") if (r_in and r_out) else 0
+        hrs = round(mins / 60.0, 1)
+        wage = shop_staffs.get(t_copy.get('staff_name', ''), {}).get('hourly_wage', 1100)
+        t_copy['calc_hours'] = hrs
+        t_copy['calc_pay'] = int(hrs * wage)
+        filtered_timeclock.append(t_copy)
+
+    today_staff_map = {}
+    for act in shop_actual:
+        if act.get('date') == today_biz_str and act.get('status') != '欠勤' and act.get('time'):
+            sname = act['staff_name']
+            mins = calc_work_minutes(act['time'])
+            if mins > 0:
+                hrs = round(mins / 60.0, 1)
+                wage = shop_staffs.get(sname, {}).get('hourly_wage', 1100)
+                today_staff_map[sname] = {
+                    'name': sname,
+                    'hours': hrs,
+                    'pay': int(hrs * wage),
+                    'is_confirmed': True
+                }
+
+    for t in all_shop_timeclock:
+        if t.get('date') == today_biz_str:
+            sname = t.get('staff_name', '')
+            if sname in today_staff_map:
+                continue
+            r_in = t.get('rounded_in') or t.get('clock_in', '')
+            r_out = t.get('rounded_out') or t.get('clock_out', '')
+            if r_in and r_out:
+                mins = calc_work_minutes(f"{r_in}-{r_out}")
+                if mins > 0:
+                    hrs = round(mins / 60.0, 1)
+                    wage = shop_staffs.get(sname, {}).get('hourly_wage', 1100)
+                    today_staff_map[sname] = {
+                        'name': sname,
+                        'hours': hrs,
+                        'pay': int(hrs * wage),
+                        'is_confirmed': (t.get('approved') == '1')
+                    }
+
+    today_items = list(today_staff_map.values())
+    today_labor_summary = {
+        'total_pay': sum(x['pay'] for x in today_items),
+        'staff_items': today_items
+    }
 
     admin_staff_summaries = {}
     for staff_name, s_info in shop_staffs.items():
@@ -1460,7 +1731,10 @@ def index():
         selected_week_idx=week_idx,
         wishes=shop_wishes,
         shifts=shop_shifts,
-        timeclock_logs=shop_timeclock,
+        all_shop_timeclock=all_shop_timeclock,
+        timeclock_logs=filtered_timeclock,
+        today_labor_summary=today_labor_summary,
+        tc_view=tc_view,
         time_options=TIME_OPTIONS,
         month_title=month_title,
         current_year=year,
@@ -1470,13 +1744,16 @@ def index():
         deadline_first_val=dl_first.replace(' ', 'T') if dl_first else '',
         deadline_second_val=dl_second.replace(' ', 'T') if dl_second else '',
         admin_staff_summaries=admin_staff_summaries,
-        login_error=False
+        login_error=login_error
     )
 
 @app.route('/admin_login', methods=['POST'])
 def admin_login():
-    if request.form.get('password') == admin_credentials['password']: session['is_admin'] = True
-    return redirect(url_for('index'))
+    shop_id = request.form.get('shop_id', 'shop1')
+    if request.form.get('password') == admin_credentials['password']:
+        session['is_admin'] = True
+        return redirect(url_for('index', shop_id=shop_id))
+    return redirect(url_for('index', shop_id=shop_id, error='1'))
 
 @app.route('/admin/settings')
 def admin_settings(): 
@@ -1496,12 +1773,26 @@ def logout():
     session.pop('clock_unlocked', None)
     return redirect(url_for('index'))
 
+@app.route('/staff_logout')
+def staff_logout():
+    session.pop('logged_staff', None)
+    session.pop('staff_shop_id', None)
+    return redirect(url_for('staff_page'))
+
+@app.route('/clock_mode')
+def clock_mode():
+    shop_id = request.args.get('shop_id', 'shop1')
+    session.pop('is_admin', None)
+    session['clock_unlocked'] = True
+    return redirect(url_for('clock_page', shop_id=shop_id))
+
 # --- 店舗タイムカード打刻画面 (/clock) ---
 @app.route('/clock')
 def clock_page():
     shop_id = request.args.get('shop_id', 'shop1')
     current_shop = next((s for s in shops if s['id'] == shop_id), shops[0])
     shop_staffs = {name: info for name, info in staffs_db.items() if info.get('shop_id', 'shop1') == shop_id}
+    staff_code_map = {str(info.get('staff_code', '')).strip(): name for name, info in shop_staffs.items() if info.get('staff_code')}
     today_str = get_business_date(get_now_jst())
     today_logs = [t for t in timeclock_logs if t.get('shop_id', 'shop1') == shop_id and t.get('date') == today_str]
 
@@ -1510,6 +1801,7 @@ def clock_page():
         shops=shops,
         current_shop=current_shop,
         staffs=shop_staffs,
+        staff_code_map_json=json.dumps(staff_code_map, ensure_ascii=False),
         clock_unlocked=session.get('clock_unlocked', False),
         pin_error=request.args.get('error') == '1',
         today_str=today_str,
@@ -1523,6 +1815,16 @@ def clock_unlock():
         session['clock_unlocked'] = True
         return redirect(url_for('clock_page', shop_id=shop_id))
     return redirect(url_for('clock_page', shop_id=shop_id, error='1'))
+
+@app.route('/api/verify_admin_return', methods=['POST'])
+def verify_admin_return():
+    pw = request.json.get('password', '')
+    keep_clock_mode = request.json.get('keep_clock_mode', False)
+    if pw == admin_credentials['password']:
+        if not keep_clock_mode:
+            session['is_admin'] = True
+        return jsonify({'success': True})
+    return jsonify({'success': False})
 
 # --- スタッフ個人画面 (/staff) ---
 @app.route('/staff')
@@ -1543,7 +1845,9 @@ def staff_page():
     shop_actual = [a for a in actual_shifts_data if a.get('shop_id', 'shop1') == shop_id]
 
     w_data, s_data, details, days, hours = {}, {}, [], 0, 0.0
+    staff_code = ''
     if staff in shop_staffs:
+        staff_code = shop_staffs[staff].get('staff_code', '')
         w_data = {w['date']: w for w in shop_wishes if w['staff_name'] == staff}
         s_data = {s['date']: {'shift': s['shift'], 'time_display': format_time_display(s['time'])} for s in shop_published if s['staff_name'] == staff}
 
@@ -1586,6 +1890,7 @@ def staff_page():
         current_month=m,
         staffs=shop_staffs,
         selected_staff=staff,
+        staff_code=staff_code,
         logged_in=bool(staff),
         all_days=all_days,
         staff_wishes=w_data,
@@ -1603,13 +1908,20 @@ def staff_page():
 
 @app.route('/staff_login', methods=['POST'])
 def staff_login():
-    name = request.form.get('name')
     shop_id = request.form.get('shop_id', 'shop1')
-    if name in staffs_db:
-        if staffs_db[name].get('shop_id', 'shop1') == shop_id and staffs_db[name]['password'] == request.form.get('staff_password'):
-            session['logged_staff'] = name
-            session['staff_shop_id'] = shop_id
-            return redirect(url_for('staff_page'))
+    staff_code = str(request.form.get('staff_code', '')).strip()
+    password = request.form.get('staff_password', '')
+
+    matched_name = next(
+        (name for name, info in staffs_db.items()
+         if info.get('shop_id', 'shop1') == shop_id and str(info.get('staff_code', '')).strip() == staff_code),
+        None
+    )
+
+    if matched_name and staffs_db[matched_name]['password'] == password:
+        session['logged_staff'] = matched_name
+        session['staff_shop_id'] = shop_id
+        return redirect(url_for('staff_page'))
     return redirect(url_for('staff_page', error='1'))
 
 # ==========================================
@@ -1618,12 +1930,18 @@ def staff_login():
 @app.route('/api/timeclock', methods=['POST'])
 def api_timeclock():
     shop_id = request.json.get('shop_id', 'shop1')
-    staff_name = request.json.get('staff_name')
+    staff_code = str(request.json.get('staff_code', '')).strip()
     password = request.json.get('password')
     action = request.json.get('action')
 
-    if staff_name not in staffs_db or staffs_db[staff_name].get('shop_id', 'shop1') != shop_id:
-        return jsonify({'success': False, 'message': 'スタッフが見つかりません'})
+    staff_name = next(
+        (name for name, info in staffs_db.items()
+         if info.get('shop_id', 'shop1') == shop_id and str(info.get('staff_code', '')).strip() == staff_code),
+        None
+    )
+
+    if not staff_name:
+        return jsonify({'success': False, 'message': '⚠️ 該当するシフト番号が見つかりません'})
     if staffs_db[staff_name]['password'] != password:
         return jsonify({'success': False, 'message': '⚠️ パスワードが間違っています'})
 
@@ -1701,6 +2019,25 @@ def api_delete_timeclock():
     save_data(immediate=True)
     return jsonify({'success': True, 'message': '削除しました'})
 
+@app.route('/api/delete_month_timeclock', methods=['POST'])
+def api_delete_month_timeclock():
+    if not session.get('is_admin'):
+        return jsonify({'success': False, 'message': '管理者権限が必要です'})
+    shop_id = request.json.get('shop_id', 'shop1')
+    year = int(request.json.get('year'))
+    month = int(request.json.get('month'))
+    prefix = f"{year}-{month:02d}-"
+
+    global timeclock_logs
+    before_count = len(timeclock_logs)
+    timeclock_logs = [
+        t for t in timeclock_logs
+        if not (t.get('shop_id', 'shop1') == shop_id and t.get('date', '').startswith(prefix))
+    ]
+    deleted_count = before_count - len(timeclock_logs)
+    save_data(immediate=True)
+    return jsonify({'success': True, 'message': f'{year}年{month}月の打刻ログ（{deleted_count}件）をスプレッドシートから削除しました'})
+
 # --- 既存APIエンドポイント ---
 @app.route('/api/add_shop', methods=['POST'])
 def add_shop():
@@ -1717,10 +2054,23 @@ def add_shop():
 def add_staff():
     name = request.json.get('name')
     shop_id = request.json.get('shop_id', 'shop1')
+    code = str(request.json.get('staff_code', '')).strip()
+    if not code:
+        code = get_next_staff_code(staffs_db)
+    elif any(str(info.get('staff_code', '')).strip() == code and info.get('shop_id', 'shop1') == shop_id for info in staffs_db.values()):
+        return jsonify({'success': False, 'message': f'シフト番号「{code}」は同じ店舗ですでに使われています'})
+
     if name and name not in staffs_db:
-        staffs_db[name] = {'password': '0000', 'hourly_wage': int(request.json.get('wage', 1100)), 'default_position': request.json.get('default_position', ''), 'shop_id': shop_id}
-        save_data(immediate=True); return jsonify({'success': True, 'message': '追加完了'})
-    return jsonify({'success': False, 'message': 'エラー'})
+        staffs_db[name] = {
+            'password': '0000',
+            'hourly_wage': int(request.json.get('wage', 1100)),
+            'default_position': request.json.get('default_position', ''),
+            'shop_id': shop_id,
+            'staff_code': code
+        }
+        save_data(immediate=True)
+        return jsonify({'success': True, 'message': f'追加完了（シフト番号: {code}）'})
+    return jsonify({'success': False, 'message': 'すでに登録されている名前か、入力に不備があります'})
 
 @app.route('/api/delete_staff', methods=['POST'])
 def delete_staff():
@@ -1734,6 +2084,12 @@ def delete_staff():
 def update_staff_info():
     sn = request.json.get('staff_name')
     if sn in staffs_db:
+        new_code = str(request.json.get('staff_code', '')).strip()
+        shop_id = staffs_db[sn].get('shop_id', 'shop1')
+        if new_code:
+            if any(k != sn and str(v.get('staff_code', '')).strip() == new_code and v.get('shop_id', 'shop1') == shop_id for k, v in staffs_db.items()):
+                return jsonify({'success': False, 'message': f'シフト番号「{new_code}」は他のスタッフと重複しています'})
+            staffs_db[sn]['staff_code'] = new_code
         if request.json.get('new_password'): staffs_db[sn]['password'] = request.json.get('new_password')
         if request.json.get('new_wage'): staffs_db[sn]['hourly_wage'] = int(request.json.get('new_wage'))
         if request.json.get('default_position') is not None: staffs_db[sn]['default_position'] = request.json.get('default_position')
